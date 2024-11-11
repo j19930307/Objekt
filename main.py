@@ -19,7 +19,8 @@ async def on_ready():
     print('Bot is ready to receive commands')
 
 
-seasons = ["atom01", "binary01", "cream01", "divine01"]
+seasons = ["atom01", "binary01", "cream01", "divine01", "ever01"]
+season_prefixes = [season[0] for season in seasons]
 members = [
     "YooYeon", "Mayu", "Xinyu", "NaKyoung", "SoHyun",
     "DaHyun", "Nien", "SeoYeon", "JiYeon", "Kotone",
@@ -53,7 +54,7 @@ async def objekt(ctx: discord.ApplicationContext,
                                       description="請輸入卡號，季節1碼 + 編號3碼 + 電子或實體版1碼 (此碼可不填，預設帶入電子版)",
                                       required=True)):
     card_numbers = card_numbers.lower()
-    if not re.match("^[a-d]\\d{3}[az]?$", card_numbers):
+    if not re.match(f"^[{''.join(season_prefixes)}]\\d{{3}}[az]?$", card_numbers):
         message = await ctx.respond("卡號輸入錯誤")
         await message.delete(delay=5)
     else:
@@ -133,7 +134,10 @@ async def parse_message(content: str):
                 break
             # 卡號
             codes = re.findall(card_numbers_regex, line)
-            name_card_numbers_dict[name] = codes
+            if name in name_card_numbers_dict.keys():
+                name_card_numbers_dict[name].extend(codes)
+            else:
+                name_card_numbers_dict[name] = codes
 
     return name_card_numbers_dict, error_message
 
