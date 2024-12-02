@@ -44,7 +44,8 @@ def get_objekt_info(season: str, member: str, collection: str):
 
     return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
                   back_image=by_slug["backImage"],
-                  copies=metadata["total"], description=metadata["metadata"]["description"])
+                  copies=metadata["total"], description=metadata["metadata"]["description"],
+                  transferable=metadata["transferable"], percentage=metadata["percentage"])
 
 
 @bot.slash_command(description="查詢 Objekt 資訊")
@@ -69,11 +70,20 @@ async def objekt(ctx: discord.ApplicationContext,
 
 
 def create_embed(objekt: Objekt):
-    collection = EmbedField(name="編號", value=objekt.collection)
-    copies = EmbedField(name="發行數量", value=str(objekt.copies))
+    collection = EmbedField(name="編號", value=objekt.collection, inline=True)
+    copies = EmbedField(name="發行量", value=str(objekt.copies), inline=True)
+    # 排版用空白欄位
+    space = EmbedField(name="\u200B", value="\u200B", inline=True)
+    percentage = EmbedField(name="可傳率", value=f"{objekt.percentage}%", inline=True)
+    transferable = EmbedField(name="可傳量", value=objekt.transferable, inline=True)
     description = EmbedField(name="說明", value=objekt.description)
+    # 可傳率為 100% 時，則不顯示可傳資訊
+    if objekt.copies == objekt.transferable:
+        fields = [collection, copies, description]
+    else:
+        fields = [collection, copies, space, percentage, transferable, space, description]
     # Embed url 相同，會將兩張圖片合併顯示在第一個 Embed
-    embed1 = Embed(url="https://www.google.com", image=objekt.front_image, fields=[collection, copies, description])
+    embed1 = Embed(url="https://www.google.com", image=objekt.front_image, fields=fields)
     embed2 = Embed(url="https://www.google.com", image=objekt.back_image)
     return [embed1, embed2]
 
