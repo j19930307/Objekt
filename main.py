@@ -44,7 +44,7 @@ def get_objekt_info(season: str, member: str, collection: str):
 
     return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
                   back_image=by_slug["backImage"],
-                  copies=metadata["copies"], description=metadata["metadata"]["description"])
+                  copies=metadata["total"], description=metadata["metadata"]["description"])
 
 
 @bot.slash_command(description="查詢 Objekt 資訊")
