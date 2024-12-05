@@ -42,9 +42,11 @@ def get_objekt_info(season: str, member: str, collection: str):
     metadata = json.loads(metadata_response.text)
     by_slug = json.loads(by_slug_response.text)
 
+    metadata_details = metadata.get("metadata", {})
+    description = metadata_details.get("description", "")
+
     return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
-                  back_image=by_slug["backImage"],
-                  copies=metadata["total"], description=metadata["metadata"]["description"],
+                  back_image=by_slug["backImage"], copies=metadata["total"], description=description,
                   transferable=metadata["transferable"], percentage=metadata["percentage"])
 
 
