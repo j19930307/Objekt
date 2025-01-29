@@ -97,6 +97,9 @@ async def on_message(message):
 
 # 多筆查詢
 async def read_message(message):
+    # 排除 @everyone 或 @here
+    if message.mention_everyone:
+        return
     # 排除機器人本身的訊息，避免無限循環
     if message.author == bot.user:
         return
