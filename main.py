@@ -3,8 +3,10 @@ import os
 import re
 import discord
 import requests
-from discord import Option, Embed, EmbedField
+from discord import Option, Embed, EmbedField, InputTextStyle
 from dotenv import load_dotenv
+
+from constants import MEMBERS, MEMBERS_LOWER, SEASONS, CARD_NUMBER_REGEX
 from objekt import Objekt
 
 load_dotenv()
@@ -15,24 +17,13 @@ bot = discord.Bot()
 
 @bot.event
 async def on_ready():
+    """機器人啟動時執行，顯示登入訊息"""
     print(f'Logged in as {bot.user.name} ({bot.user.id})')
     print('Bot is ready to receive commands')
 
 
-seasons = ["atom01", "binary01", "cream01", "divine01", "ever01"]
-season_prefixes = [season[0] for season in seasons]
-members = [
-    "YooYeon", "Mayu", "Xinyu", "NaKyoung", "SoHyun",
-    "DaHyun", "Nien", "SeoYeon", "JiYeon", "Kotone",
-    "ChaeYeon", "YuBin", "JiWoo", "Kaede", "ShiOn",
-    "Lynn", "Sullin", "HyeRin", "ChaeWon", "HaYeon",
-    "SooMin", "YeonJi", "JooBin", "SeoAh"
-]
-members_lower = [member.lower() for member in members]
-card_numbers_regex = "[a-z]\\d{3}[az]?"
-
-
 def get_objekt_info(season: str, member: str, collection: str):
+    """從 API 獲取 Objekt 資訊"""
     metadata_response = requests.get(f"https://apollo.cafe/api/objekts/metadata/{season}-{member}-{collection}")
     by_slug_response = requests.get(f"https://apollo.cafe/api/objekts/by-slug/{season}-{member}-{collection}")
 
@@ -52,26 +43,56 @@ def get_objekt_info(season: str, member: str, collection: str):
 
 @bot.slash_command(description="查詢 Objekt 資訊")
 async def objekt(ctx: discord.ApplicationContext,
-                 member: Option(str, description="請選擇成員", choices=members),
-                 card_numbers: Option(str,
-                                      description="請輸入卡號，季節1碼 + 編號3碼 + 電子或實體版1碼 (此碼可不填，預設帶入電子版)",
-                                      required=True)):
-    card_numbers = card_numbers.lower()
-    if not re.match(f"^[{''.join(season_prefixes)}]\\d{{3}}[az]?$", card_numbers):
-        message = await ctx.respond("卡號輸入錯誤")
-        await message.delete(delay=5)
+                 member: Option(str, description="請選擇成員", choices=MEMBERS),
+                 cards: Option(str, description="請輸入卡號 (可查詢多筆)", required=True)):
+    """處理單筆 Objekt 查詢"""
+    cards_number = re.findall(CARD_NUMBER_REGEX, cards.lower())
+    if not cards_number:
+        await ctx.respond("卡號輸入錯誤")
     else:
-        season, collection = card_numbers_to_season_collection(card_numbers)
         await ctx.defer()
-        objekt = get_objekt_info(season, member.lower(), collection)
-        if objekt is None:
-            message = await ctx.respond("查無資訊")
-            await message.delete(delay=5)
-        else:
-            await ctx.followup.send(embeds=create_embed(objekt))
+        embeds = []
+        error_message = []
+        for number in cards_number:
+            season, collection = parse_card_number(card_number_trailing_z(number))
+            objekt = get_objekt_info(season, member.lower(), collection)
+            if objekt is None:
+                error_message.append(f"{member} {season[0]}{collection} 查無資訊")
+            else:
+                embeds.extend(create_embed(objekt))
+        await ctx.respond(embeds=embeds)
+        await ctx.respond("\n".join(error_message))
+
+
+@bot.slash_command(description="查詢多筆 Objekt 資訊")
+async def objekts(ctx: discord.ApplicationContext):
+    """顯示查詢多筆 Objekt 資訊的對話框"""
+    await ctx.send_modal(SearchModal())
+
+
+class SearchModal(discord.ui.Modal):
+    """Discord UI Modal 用於輸入查詢多筆 Objekt 資訊"""
+
+    def __init__(self):
+        super().__init__(title="查詢多筆 Objekt 資訊")
+        self.add_item(
+            discord.ui.InputText(
+                style=InputTextStyle.long,
+                label="請輸入查詢內容",
+                placeholder="輸入範例：\nJiwoo B208 c208 C315\nchaeyeon c315,b207,b208"
+            )
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        """處理使用者輸入後的回應"""
+        await interaction.response.defer()
+        processing_message = await interaction.channel.send("處理中，請稍後...")
+        await send_objekt_info_to_discord(channel=interaction.channel, input_text=self.children[0].value)
+        await processing_message.delete()
 
 
 def create_embed(objekt: Objekt):
+    """建立 Discord Embed 以顯示 Objekt 資訊"""
     collection = EmbedField(name="編號", value=objekt.collection, inline=True)
     copies = EmbedField(name="發行量", value=str(objekt.copies), inline=True)
     # 排版用空白欄位
@@ -92,11 +113,12 @@ def create_embed(objekt: Objekt):
 
 @bot.listen('on_message')
 async def on_message(message):
+    """監聽訊息，若提及機器人則處理查詢"""
     await read_message(message)
 
 
-# 多筆查詢
 async def read_message(message):
+    """處理使用者發送的訊息，並回應 Objekt 資訊"""
     # 排除 @everyone 或 @here
     if message.mention_everyone:
         return
@@ -106,64 +128,84 @@ async def read_message(message):
     # 確認訊息中是否有 @bot
     if not bot.user.mentioned_in(message):
         return
-
-    channel = message.channel
-    error_message = []
-
-    loading_message = await channel.send(content="處理中，請稍後...")
-    search_dict, error = await parse_message(content=message.content)
-    error_message.extend(error)
-
-    for name, codes in search_dict.items():
-        for code in codes:
-            season, collection = card_numbers_to_season_collection(code)
-            if season is None or collection is None:
-                error_message.append(f"{name} {code} 卡號輸入錯誤")
-            else:
-                objekt = get_objekt_info(season=season, member=name, collection=collection)
-                if objekt is None:
-                    error_message.append(f"{name}  {season[0]}{collection} 查無資訊")
-                else:
-                    await channel.send(embeds=create_embed(objekt))
+    processing_message = await message.channel.send("處理中，請稍後...")
+    await send_objekt_info_to_discord(message.channel, message.content)
+    await processing_message.delete()
     # 刪除使用者訊息
     await message.delete()
-    # 刪除載入中訊息
-    await loading_message.delete()
-    if error_message:
-        # 發送錯誤訊息
+
+
+async def send_objekt_info_to_discord(channel, input_text: str):
+    """解析輸入內容並發送 Objekt 資訊至 Discord"""
+    member_cards, error_message = await parse_message(content=input_text)
+    if not member_cards:
+        error_message.append("輸入內容無法解析")
+    else:
+        for name, cards_number in member_cards.items():
+            for number in cards_number:
+                season, collection = parse_card_number(number)
+                if season is None or collection is None:
+                    error_message.append(f"{name} {number} 卡號輸入錯誤")
+                else:
+                    objekt = get_objekt_info(season=season, member=name, collection=collection)
+                    if objekt is None:
+                        error_message.append(f"{name} {season[0]}{collection} 查無資訊")
+                    else:
+                        await channel.send(embeds=create_embed(objekt))
+    if error_message:  # 如果有錯誤訊息
         await channel.send("\n".join(error_message))
 
 
-# 將訊息轉換成 dict (key 為名字，value 為卡號陣列)
 async def parse_message(content: str):
-    name_card_numbers_dict = {}
-    error_message = []
+    """
+    解析訊息內容，提取成員名稱與對應的卡號。
 
-    for line in content.lower().strip().split("\n"):
-        # 名字
-        match = re.search(r"[a-z]+", line)
+    參數:
+        content (str): 訊息內容，每行可能包含成員名稱與卡號。
+
+    回傳:
+        tuple[dict[str, list[str]], list[str]]:
+            - member_cards: 字典，key 為成員名稱 (小寫)，value 為該成員的卡號列表。
+            - error_message: 錯誤訊息列表，包含無法解析的行或錯誤的名稱資訊。
+    """
+
+    member_cards = {}  # 存儲解析出的成員名稱及其對應的卡號
+    error_message = []  # 存儲錯誤訊息
+
+    for line in content.lower().strip().split("\n"):  # 逐行處理輸入內容
+        # 使用正則表達式尋找每行開頭的成員名稱
+        match = re.search(r"^([a-z]+)\s+", line)
         if match:
-            name = match.group()
-            if name not in members_lower:
+            name = match.group(1)  # 提取成員名稱
+            if name not in MEMBERS_LOWER:  # 驗證名稱是否在已知成員列表中
                 error_message.append(f"{line} 名字輸入錯誤")
-                break
-            # 卡號
-            codes = re.findall(card_numbers_regex, line)
-            if name in name_card_numbers_dict.keys():
-                name_card_numbers_dict[name].extend(codes)
-            else:
-                name_card_numbers_dict[name] = codes
+                continue
 
-    return name_card_numbers_dict, error_message
+            # 使用正則表達式提取卡號
+            cards_number = re.findall(CARD_NUMBER_REGEX, line)
+            if cards_number:  # 如果有找到卡號
+                cards_number = [card_number_trailing_z(number) for number in cards_number]
+                member_cards.setdefault(name, []).extend(cards_number)  # 將卡號存入對應成員的列表中
+            else:  # 如果沒有找到卡號
+                error_message.append(f"{line} 卡號輸入錯誤")
+
+    return member_cards, error_message  # 回傳解析結果與錯誤訊息
 
 
-def card_numbers_to_season_collection(card_numbers):
-    season_prefix = card_numbers[0]
-    season = next((season for season in seasons if season.startswith(season_prefix)), None)
-    collection = card_numbers[1:]
-    if len(collection) == 3:  # 如果為 3 碼，加上電子版本碼 Z
-        collection += "z"
+def parse_card_number(card_number):
+    """解析卡號為季節和3碼編號1碼版本"""
+    season_prefix = card_number[0]
+    season = next((season for season in SEASONS if season.startswith(season_prefix)), None)
+    collection = card_number[1:]
     return season, collection
+
+
+def card_number_trailing_z(card_number):
+    """4 碼卡號補上電子版本代碼 z"""
+    if len(card_number) == 4:
+        return card_number + "z"
+    else:
+        return card_number
 
 
 bot.run(BOT_TOKEN)
