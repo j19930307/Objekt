@@ -22,25 +22,6 @@ async def on_ready():
     print('Bot is ready to receive commands')
 
 
-def get_objekt_info(season: str, member: str, collection: str):
-    """從 API 獲取 Objekt 資訊"""
-    metadata_response = requests.get(f"https://apollo.cafe/api/objekts/metadata/{season}-{member}-{collection}")
-    by_slug_response = requests.get(f"https://apollo.cafe/api/objekts/by-slug/{season}-{member}-{collection}")
-
-    if metadata_response.status_code != 200 or by_slug_response.status_code != 200:
-        return
-
-    metadata = json.loads(metadata_response.text)
-    by_slug = json.loads(by_slug_response.text)
-
-    metadata_details = metadata.get("metadata", {})
-    description = metadata_details.get("description", "")
-
-    return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
-                  back_image=by_slug["backImage"], copies=metadata["total"], description=description,
-                  transferable=metadata["transferable"], percentage=metadata["percentage"])
-
-
 @bot.slash_command(description="查詢 Objekt 資訊")
 async def objekt(ctx: discord.ApplicationContext,
                  member: Option(str, description="請選擇成員", choices=MEMBERS),
@@ -61,13 +42,20 @@ async def objekt(ctx: discord.ApplicationContext,
             else:
                 embeds.extend(create_embed(objekt))
         await ctx.respond(embeds=embeds)
-        await ctx.respond("\n".join(error_message))
+        if error_message:
+            await ctx.respond("\n".join(error_message))
 
 
 @bot.slash_command(description="查詢多筆 Objekt 資訊")
 async def objekts(ctx: discord.ApplicationContext):
     """顯示查詢多筆 Objekt 資訊的對話框"""
     await ctx.send_modal(SearchModal())
+
+
+@bot.listen('on_message')
+async def on_message(message):
+    """監聽訊息，若提及機器人則處理查詢"""
+    await listen_message(message)
 
 
 class SearchModal(discord.ui.Modal):
@@ -85,10 +73,28 @@ class SearchModal(discord.ui.Modal):
 
     async def callback(self, interaction: discord.Interaction):
         """處理使用者輸入後的回應"""
-        await interaction.response.defer()
-        processing_message = await interaction.channel.send("處理中，請稍後...")
-        await send_objekt_info_to_discord(channel=interaction.channel, input_text=self.children[0].value)
-        await processing_message.delete()
+        await interaction.response.send_message(self.children[0].value)
+        sent_message = await interaction.original_response()
+        await send_objekt_info_to_discord(message=sent_message, input_text=self.children[0].value)
+
+
+def get_objekt_info(season: str, member: str, collection: str):
+    """從 API 獲取 Objekt 資訊"""
+    metadata_response = requests.get(f"https://apollo.cafe/api/objekts/metadata/{season}-{member}-{collection}")
+    by_slug_response = requests.get(f"https://apollo.cafe/api/objekts/by-slug/{season}-{member}-{collection}")
+
+    if metadata_response.status_code != 200 or by_slug_response.status_code != 200:
+        return
+
+    metadata = json.loads(metadata_response.text)
+    by_slug = json.loads(by_slug_response.text)
+
+    metadata_details = metadata.get("metadata", {})
+    description = metadata_details.get("description", "")
+
+    return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
+                  back_image=by_slug["backImage"], copies=metadata["total"], description=description,
+                  transferable=metadata["transferable"], percentage=metadata["percentage"])
 
 
 def create_embed(objekt: Objekt):
@@ -111,13 +117,7 @@ def create_embed(objekt: Objekt):
     return [embed1, embed2]
 
 
-@bot.listen('on_message')
-async def on_message(message):
-    """監聽訊息，若提及機器人則處理查詢"""
-    await read_message(message)
-
-
-async def read_message(message):
+async def listen_message(message):
     """處理使用者發送的訊息，並回應 Objekt 資訊"""
     # 排除 @everyone 或 @here
     if message.mention_everyone:
@@ -129,13 +129,11 @@ async def read_message(message):
     if not bot.user.mentioned_in(message):
         return
     processing_message = await message.channel.send("處理中，請稍後...")
-    await send_objekt_info_to_discord(message.channel, message.content)
+    await send_objekt_info_to_discord(message=message, input_text=remove_mentions(message))
     await processing_message.delete()
-    # 刪除使用者訊息
-    await message.delete()
 
 
-async def send_objekt_info_to_discord(channel, input_text: str):
+async def send_objekt_info_to_discord(message, input_text: str):
     """解析輸入內容並發送 Objekt 資訊至 Discord"""
     member_cards, error_message = await parse_message(content=input_text)
     if not member_cards:
@@ -151,9 +149,9 @@ async def send_objekt_info_to_discord(channel, input_text: str):
                     if objekt is None:
                         error_message.append(f"{name} {season[0]}{collection} 查無資訊")
                     else:
-                        await channel.send(embeds=create_embed(objekt))
+                        await message.reply(embeds=create_embed(objekt), mention_author=False)
     if error_message:  # 如果有錯誤訊息
-        await channel.send("\n".join(error_message))
+        await message.reply(content="\n".join(error_message), mention_author=False)
 
 
 async def parse_message(content: str):
@@ -206,6 +204,15 @@ def card_number_trailing_z(card_number):
         return card_number + "z"
     else:
         return card_number
+
+
+def remove_mentions(message):
+    """訊息內容移除 @bot 的部分"""
+    content = message.content
+    for mention in message.mentions:
+        if mention == bot.user:
+            content = content.replace(mention.mention, "").strip()  # 移除 @bot 並去除前後空白
+    return content
 
 
 bot.run(BOT_TOKEN)
