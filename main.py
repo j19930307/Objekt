@@ -22,9 +22,16 @@ async def on_ready():
     print('Bot is ready to receive commands')
 
 
+async def autocomplete_members(ctx: discord.AutocompleteContext):
+    """當用戶輸入選項時，提供自動補全建議。"""
+    query = ctx.value.lower()  # 取得用戶目前輸入的字串
+    return [member for member in MEMBERS if member.lower().startswith(query)]  # 篩選出以目前輸入開頭的選項
+
+
 @bot.slash_command(description="查詢 Objekt 資訊")
 async def objekt(ctx: discord.ApplicationContext,
-                 member: Option(str, description="請選擇成員", choices=MEMBERS),
+                 member: Option(str, description="請選擇成員",
+                                autocomplete=discord.utils.basic_autocomplete(autocomplete_members)),
                  cards: Option(str, description="請輸入卡號 (可查詢多筆)", required=True)):
     """處理單筆 Objekt 查詢"""
     cards_number = re.findall(CARD_NUMBER_REGEX, cards.lower())

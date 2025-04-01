@@ -8,7 +8,8 @@ MEMBERS = [
     "DaHyun", "Nien", "SeoYeon", "JiYeon", "Kotone",
     "ChaeYeon", "YuBin", "JiWoo", "Kaede", "ShiOn",
     "Lynn", "Sullin", "HyeRin", "ChaeWon", "HaYeon",
-    "SooMin", "YeonJi", "JooBin", "SeoAh"
+    "SooMin", "YeonJi", "JooBin", "SeoAh", "JinSoul",
+    "HaSeul", "KimLip", "HeeJin", "Choerry"
 ]
 MEMBERS_LOWER = [member.lower() for member in MEMBERS]
 
