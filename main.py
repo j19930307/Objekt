@@ -6,7 +6,7 @@ import requests
 from discord import Option, Embed, EmbedField, InputTextStyle
 from dotenv import load_dotenv
 
-from constants import MEMBERS, MEMBERS_LOWER, SEASONS, CARD_NUMBER_REGEX
+from constants import MEMBERS, MEMBERS_LOWER, SEASONS, CARD_NUMBER_REGEX, SEASONS_PREFIX
 from objekt import Objekt
 
 load_dotenv()
@@ -34,12 +34,14 @@ async def objekt(ctx: discord.ApplicationContext,
                                 autocomplete=discord.utils.basic_autocomplete(autocomplete_members)),
                  cards: Option(str, description="請輸入卡號 (可查詢多筆)", required=True)):
     """處理單筆 Objekt 查詢"""
-    cards_number = re.findall(CARD_NUMBER_REGEX, cards.lower())
-    if not cards_number:
+
+    # 移除逗號並分割成單字
+    cards_number = cards.lower().replace(',', ' ').strip().split()
+    all_valid = all(re.fullmatch(CARD_NUMBER_REGEX, card) for card in cards_number)
+    if not all_valid:
         await ctx.respond("卡號輸入錯誤")
     else:
         await ctx.defer()
-        embeds = []
         error_message = []
         for number in cards_number:
             season, collection = parse_card_number(card_number_trailing_z(number))
@@ -47,10 +49,9 @@ async def objekt(ctx: discord.ApplicationContext,
             if objekt is None:
                 error_message.append(f"{member} {season[0]}{collection} 查無資訊")
             else:
-                embeds.extend(create_embed(objekt))
-        await ctx.respond(embeds=embeds)
-        if error_message:
-            await ctx.respond("\n".join(error_message))
+                await ctx.respond(embeds=create_embed(objekt))
+            if error_message:
+                await ctx.respond("\n".join(error_message))
 
 
 @bot.slash_command(description="查詢多筆 Objekt 資訊")
@@ -178,39 +179,52 @@ async def parse_message(content: str):
     error_message = []  # 存儲錯誤訊息
 
     for line in content.lower().strip().split("\n"):  # 逐行處理輸入內容
-        # 使用正則表達式尋找每行開頭的成員名稱
-        match = re.search(r"^([a-z]+)\s+", line)
-        if match:
-            name = match.group(1)  # 提取成員名稱
-            if name not in MEMBERS_LOWER:  # 驗證名稱是否在已知成員列表中
-                error_message.append(f"{line} 名字輸入錯誤")
-                continue
+        # 移除逗號並分割成單字
+        clean_line = line.replace(',', ' ')
+        parts = clean_line.strip().split()
+        name = parts[0]
+        cards = parts[1:]
 
-            # 使用正則表達式提取卡號
-            cards_number = re.findall(CARD_NUMBER_REGEX, line)
-            if cards_number:  # 如果有找到卡號
-                cards_number = [card_number_trailing_z(number) for number in cards_number]
-                member_cards.setdefault(name, []).extend(cards_number)  # 將卡號存入對應成員的列表中
-            else:  # 如果沒有找到卡號
+        if name not in MEMBERS_LOWER:  # 驗證名稱是否在已知成員列表中
+            error_message.append(f"{line} 名字輸入錯誤")
+            continue
+
+        cards_number = []
+        for card in cards:
+            # 驗證卡號是否符合格式
+            if re.fullmatch(CARD_NUMBER_REGEX, card):
+                cards_number.append(card_number_trailing_z(card))
+            # 如果沒有找到卡號
+            else:
                 error_message.append(f"{line} 卡號輸入錯誤")
+
+        member_cards.setdefault(name, []).extend(cards_number)  # 將卡號存入對應成員的列表中
 
     return member_cards, error_message  # 回傳解析結果與錯誤訊息
 
 
 def parse_card_number(card_number):
-    """解析卡號為季節和3碼編號1碼版本"""
-    season_prefix = card_number[0]
-    season = next((season for season in SEASONS if season.startswith(season_prefix)), None)
-    collection = card_number[1:]
+    """解析卡號為季節名稱和 collection 編號"""
+    match = re.fullmatch(CARD_NUMBER_REGEX, card_number)
+    if not match:
+        return None, None
+
+    # 找出季節
+    prefix = match.group(1)
+    index = SEASONS_PREFIX.index(prefix)
+    season = SEASONS[index]
+
+    # 剩下的部分（如 '301', '301a'）
+    collection = card_number[len(prefix):]
+
     return season, collection
 
 
 def card_number_trailing_z(card_number):
-    """4 碼卡號補上電子版本代碼 z"""
-    if len(card_number) == 4:
-        return card_number + "z"
-    else:
-        return card_number
+    """如果卡號結尾不是 a 或 z，補上電子版本代碼 z"""
+    if not card_number.endswith(('a', 'z')):
+        return card_number + 'z'
+    return card_number
 
 
 def remove_mentions(message):
