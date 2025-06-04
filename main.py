@@ -45,13 +45,16 @@ async def objekt(ctx: discord.ApplicationContext,
         error_message = []
         for number in cards_number:
             season, collection = parse_card_number(card_number_trailing_z(number))
-            objekt = get_objekt_info(season, member.lower(), collection)
-            if objekt is None:
-                error_message.append(f"{member} {season[0]}{collection} 查無資訊")
-            else:
-                await ctx.respond(embeds=create_embed(objekt))
-            if error_message:
-                await ctx.respond("\n".join(error_message))
+            try:
+                objekt = get_objekt_info(season, member.lower(), collection)
+                if objekt is None:
+                    error_message.append(f"{member} {season[0]}{collection} 查無資訊")
+                else:
+                    await ctx.respond(embeds=create_embed(objekt))
+                if error_message:
+                    await ctx.respond("\n".join(error_message))
+            except Exception as e:
+                await ctx.respond(str(e))
 
 
 @bot.slash_command(description="查詢多筆 Objekt 資訊")
@@ -92,7 +95,8 @@ def get_objekt_info(season: str, member: str, collection: str):
     by_slug_response = requests.get(f"https://apollo.cafe/api/objekts/by-slug/{season}-{member}-{collection}")
 
     if metadata_response.status_code != 200 or by_slug_response.status_code != 200:
-        return
+        raise Exception(
+            f"API 回應錯誤 (metadata: {metadata_response.status_code}) (by_slug: {by_slug_response.status_code})")
 
     metadata = json.loads(metadata_response.text)
     by_slug = json.loads(by_slug_response.text)
@@ -153,11 +157,14 @@ async def send_objekt_info_to_discord(message, input_text: str):
                 if season is None or collection is None:
                     error_message.append(f"{name} {number} 卡號輸入錯誤")
                 else:
-                    objekt = get_objekt_info(season=season, member=name, collection=collection)
-                    if objekt is None:
-                        error_message.append(f"{name} {season[0]}{collection} 查無資訊")
-                    else:
-                        await message.reply(embeds=create_embed(objekt), mention_author=False)
+                    try:
+                        objekt = get_objekt_info(season=season, member=name, collection=collection)
+                        if objekt is None:
+                            error_message.append(f"{name} {season[0]}{collection} 查無資訊")
+                        else:
+                            await message.reply(embeds=create_embed(objekt), mention_author=False)
+                    except Exception as e:
+                        await message.reply(str(e))
     if error_message:  # 如果有錯誤訊息
         await message.reply(content="\n".join(error_message), mention_author=False)
 
