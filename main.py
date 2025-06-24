@@ -137,8 +137,8 @@ async def listen_message(message):
     # 排除機器人本身的訊息，避免無限循環
     if message.author == bot.user:
         return
-    # 確認訊息中是否有 @bot
-    if not bot.user.mentioned_in(message):
+    # 確認訊息內容中是否主動 @bot
+    if bot.user.mention not in message.content:
         return
     processing_message = await message.channel.send("處理中，請稍後...")
     await send_objekt_info_to_discord(message=message, input_text=remove_mentions(message))
