@@ -189,23 +189,21 @@ async def parse_message(content: str):
         # 移除逗號並分割成單字
         clean_line = line.replace(',', ' ')
         parts = clean_line.strip().split()
-        name = parts[0]
-        cards = parts[1:]
 
-        if name not in MEMBERS_LOWER:  # 驗證名稱是否在已知成員列表中
-            error_message.append(f"{line} 名字輸入錯誤")
-            continue
+        names = []
+        cards = []
 
-        cards_number = []
-        for card in cards:
-            # 驗證卡號是否符合格式
-            if re.fullmatch(CARD_NUMBER_REGEX, card):
-                cards_number.append(card_number_trailing_z(card))
-            # 如果沒有找到卡號
+        for part in parts:
+            if part in MEMBERS_LOWER:
+                names.append(part)
+            elif re.fullmatch(CARD_NUMBER_REGEX, part):
+                cards.append(card_number_trailing_z(part))
             else:
-                error_message.append(f"{line} 卡號輸入錯誤")
+                error_message.append(f"{line} 名字或卡號輸入錯誤")
+                break
 
-        member_cards.setdefault(name, []).extend(cards_number)  # 將卡號存入對應成員的列表中
+        for name in names:
+            member_cards.setdefault(name, []).extend(cards)  # 將卡號存入對應成員的列表中
 
     return member_cards, error_message  # 回傳解析結果與錯誤訊息
 
