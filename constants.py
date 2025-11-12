@@ -1,6 +1,6 @@
 # 季節代碼
-SEASONS = ["atom01", "binary01", "cream01", "divine01", "ever01", "atom02"]
-SEASONS_PREFIX = ["a", "b", "c", "d", "e", "aa"]
+SEASONS = ["atom01", "binary01", "cream01", "divine01", "ever01", "atom02", "binary02"]
+SEASONS_PREFIX = ["a", "b", "c", "d", "e", "aa", "bb"]
 
 # 成員名稱
 MEMBERS = [
