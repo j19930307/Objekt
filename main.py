@@ -51,6 +51,8 @@ async def objekt(ctx: discord.ApplicationContext,
                     error_message.append(f"{member} {season[0]}{collection} 查無資訊")
                 else:
                     await ctx.respond(embeds=create_embed(objekt))
+                    if objekt.frontMedia:
+                        await ctx.respond(objekt.frontMedia)
                 if error_message:
                     await ctx.respond("\n".join(error_message))
             except Exception as e:
@@ -106,7 +108,8 @@ def get_objekt_info(season: str, member: str, collection: str):
 
     return Objekt(collection=by_slug["collectionNo"], front_image=by_slug["frontImage"],
                   back_image=by_slug["backImage"], copies=metadata["total"], description=description,
-                  transferable=metadata["transferable"], percentage=metadata["percentage"])
+                  transferable=metadata["transferable"], percentage=metadata["percentage"],
+                  frontMedia=by_slug["frontMedia"])
 
 
 def create_embed(objekt: Objekt):
@@ -163,6 +166,8 @@ async def send_objekt_info_to_discord(message, input_text: str):
                             error_message.append(f"{name} {season[0]}{collection} 查無資訊")
                         else:
                             await message.reply(embeds=create_embed(objekt), mention_author=False)
+                            if objekt.frontMedia:
+                                await message.reply(objekt.frontMedia, mention_author=False)
                     except Exception as e:
                         await message.reply(str(e))
     if error_message:  # 如果有錯誤訊息

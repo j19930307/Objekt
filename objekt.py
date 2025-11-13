@@ -10,6 +10,7 @@ class Objekt:
     description: str
     transferable: str  # 可傳數量
     percentage: str  # 可傳率
+    frontMedia: str
 
     def __str__(self):
         return f"""Collection: {self.collection}
@@ -18,4 +19,5 @@ class Objekt:
         Copies: {self.copies}    
         Description: {self.description}
         Transferable: {self.transferable}
-        Percentage: {self.percentage}"""
+        Percentage: {self.percentage}
+        Front Media: {self.frontMedia}"""
