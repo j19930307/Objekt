@@ -16,10 +16,10 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -31,9 +31,10 @@ jobs:
         pip install -r requirements.txt
 
     - name: Make envfile
-      uses: SpicyPizza/create-envfile@v2.0
-      with:
-        envkey_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      run: |
+        cat <<'EOF' > .env
+        BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+        EOF
 
     - name: run Python script
       run: python main.py

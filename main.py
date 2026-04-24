@@ -1,6 +1,8 @@
 import json
 import os
 import re
+from dataclasses import dataclass
+
 import discord
 import requests
 from discord import Option, Embed, EmbedField, InputTextStyle
@@ -13,6 +15,14 @@ load_dotenv()
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 bot = discord.Bot()
+
+
+@dataclass(frozen=True)
+class ParsedCardNumber:
+    raw: str
+    normalized: str
+    season: str
+    collection: str
 
 
 @bot.event
@@ -35,20 +45,17 @@ async def objekt(ctx: discord.ApplicationContext,
                  cards: Option(str, description="請輸入卡號 (可查詢多筆)", required=True)):
     """處理單筆 Objekt 查詢"""
 
-    # 移除逗號並分割成單字
-    cards_number = cards.lower().replace(',', ' ').strip().split()
-    all_valid = all(re.fullmatch(CARD_NUMBER_REGEX, card) for card in cards_number)
-    if not all_valid:
+    parsed_cards = parse_card_numbers(cards)
+    if not parsed_cards:
         await ctx.respond("卡號輸入錯誤")
     else:
         await ctx.defer()
         error_message = []
-        for number in cards_number:
-            season, collection = parse_card_number(card_number_trailing_z(number))
+        for parsed_card in parsed_cards:
             try:
-                objekt = get_objekt_info(season, member.lower(), collection)
+                objekt = get_objekt_info(parsed_card.season, member.lower(), parsed_card.collection)
                 if objekt is None:
-                    error_message.append(f"{member} {season[0]}{collection} 查無資訊")
+                    error_message.append(f"{member} {parsed_card.season[0]}{parsed_card.collection} 查無資訊")
                 else:
                     await ctx.respond(embeds=create_embed(objekt))
                     if objekt.frontMedia:
@@ -154,22 +161,22 @@ async def send_objekt_info_to_discord(message, input_text: str):
     if not member_cards:
         error_message.append("輸入內容無法解析")
     else:
-        for name, cards_number in member_cards.items():
-            for number in cards_number:
-                season, collection = parse_card_number(number)
-                if season is None or collection is None:
-                    error_message.append(f"{name} {number} 卡號輸入錯誤")
-                else:
-                    try:
-                        objekt = get_objekt_info(season=season, member=name, collection=collection)
-                        if objekt is None:
-                            error_message.append(f"{name} {season[0]}{collection} 查無資訊")
-                        else:
-                            await message.reply(embeds=create_embed(objekt), mention_author=False)
-                            if objekt.frontMedia:
-                                await message.reply(objekt.frontMedia, mention_author=False)
-                    except Exception as e:
-                        await message.reply(str(e))
+        for name, parsed_cards in member_cards.items():
+            for parsed_card in parsed_cards:
+                try:
+                    objekt = get_objekt_info(
+                        season=parsed_card.season,
+                        member=name,
+                        collection=parsed_card.collection,
+                    )
+                    if objekt is None:
+                        error_message.append(f"{name} {parsed_card.season[0]}{parsed_card.collection} 查無資訊")
+                    else:
+                        await message.reply(embeds=create_embed(objekt), mention_author=False)
+                        if objekt.frontMedia:
+                            await message.reply(objekt.frontMedia, mention_author=False)
+                except Exception as e:
+                    await message.reply(str(e))
     if error_message:  # 如果有錯誤訊息
         await message.reply(content="\n".join(error_message), mention_author=False)
 
@@ -182,8 +189,8 @@ async def parse_message(content: str):
         content (str): 訊息內容，每行可能包含成員名稱與卡號。
 
     回傳:
-        tuple[dict[str, list[str]], list[str]]:
-            - member_cards: 字典，key 為成員名稱 (小寫)，value 為該成員的卡號列表。
+        tuple[dict[str, list[ParsedCardNumber]], list[str]]:
+            - member_cards: 字典，key 為成員名稱 (小寫)，value 為該成員的已解析卡號列表。
             - error_message: 錯誤訊息列表，包含無法解析的行或錯誤的名稱資訊。
     """
 
@@ -196,45 +203,110 @@ async def parse_message(content: str):
         parts = clean_line.strip().split()
 
         names = []
-        cards = []
+        parsed_cards = []
+        line_has_error = False
 
         for part in parts:
             if part in MEMBERS_LOWER:
                 names.append(part)
-            elif re.fullmatch(CARD_NUMBER_REGEX, part):
-                cards.append(card_number_trailing_z(part))
             else:
-                error_message.append(f"{line} 名字或卡號輸入錯誤")
-                break
+                expanded_cards = parse_card_token(part)
+                if expanded_cards is None:
+                    error_message.append(f"{line} 名字或卡號輸入錯誤")
+                    line_has_error = True
+                    break
+                parsed_cards.extend(expanded_cards)
+
+        if line_has_error:
+            continue
 
         for name in names:
-            member_cards.setdefault(name, []).extend(cards)  # 將卡號存入對應成員的列表中
+            member_cards.setdefault(name, []).extend(parsed_cards)  # 將卡號存入對應成員的列表中
 
     return member_cards, error_message  # 回傳解析結果與錯誤訊息
 
 
 def parse_card_number(card_number):
-    """解析卡號為季節名稱和 collection 編號"""
-    match = re.fullmatch(CARD_NUMBER_REGEX, card_number)
+    """解析單一卡號並回傳標準化後的資訊。"""
+    card_info = parse_card_reference(card_number)
+    if card_info is None:
+        return None
+
+    normalized, prefix, _, suffix = card_info
+    season = SEASONS[SEASONS_PREFIX.index(prefix)]
+    collection = f"{normalized[len(prefix):-1]}{suffix}"
+
+    return ParsedCardNumber(
+        raw=card_number,
+        normalized=normalized,
+        season=season,
+        collection=collection,
+    )
+
+
+def parse_card_token(card_token):
+    """解析單一卡號或卡號區間。"""
+    if "-" not in card_token:
+        parsed_card = parse_card_number(card_token)
+        if parsed_card is None:
+            return None
+        return [parsed_card]
+
+    range_parts = card_token.split("-")
+    if len(range_parts) != 2:
+        return None
+
+    start_info = parse_card_reference(range_parts[0])
+    end_info = parse_card_reference(range_parts[1])
+    if start_info is None or end_info is None:
+        return None
+
+    _, start_prefix, start_number, start_suffix = start_info
+    _, end_prefix, end_number, end_suffix = end_info
+    if start_prefix != end_prefix or start_suffix != end_suffix or start_number > end_number:
+        return None
+
+    return [
+        parse_card_number(f"{start_prefix}{number:03d}{start_suffix}")
+        for number in range(start_number, end_number + 1)
+    ]
+
+
+def parse_card_reference(card_number):
+    """解析卡號基本資訊，供單卡與區間共用。"""
+    normalized = normalize_card_number(card_number)
+    if normalized is None:
+        return None
+
+    match = re.fullmatch(CARD_NUMBER_REGEX, normalized)
     if not match:
-        return None, None
+        return None
 
-    # 找出季節
     prefix = match.group(1)
-    index = SEASONS_PREFIX.index(prefix)
-    season = SEASONS[index]
-
-    # 剩下的部分（如 '301', '301a'）
-    collection = card_number[len(prefix):]
-
-    return season, collection
+    suffix = normalized[-1]
+    number = int(normalized[len(prefix):-1])
+    return normalized, prefix, number, suffix
 
 
-def card_number_trailing_z(card_number):
-    """如果卡號結尾不是 a 或 z，補上電子版本代碼 z"""
-    if not card_number.endswith(('a', 'z')):
-        return card_number + 'z'
-    return card_number
+def parse_card_numbers(cards: str):
+    """從輸入字串提取並解析多個卡號。"""
+    parsed_cards = []
+    for part in cards.lower().replace(',', ' ').strip().split():
+        expanded_cards = parse_card_token(part)
+        if expanded_cards is None:
+            return None
+        parsed_cards.extend(expanded_cards)
+    return parsed_cards
+
+
+def normalize_card_number(card_number):
+    """標準化卡號格式；若格式錯誤則回傳 None。"""
+    normalized = card_number.lower().strip()
+    if not re.fullmatch(CARD_NUMBER_REGEX, normalized):
+        return None
+    if normalized.endswith(('a', 'z')):
+        return normalized
+    return f"{normalized}z"
 
 
 def remove_mentions(message):
