@@ -134,9 +134,10 @@ def create_embed(objekt: Objekt):
     else:
         fields = [collection, copies, space, percentage, transferable, space, description]
     # Embed url 相同，會將兩張圖片合併顯示在第一個 Embed
-    embed1 = Embed(url="https://www.google.com", image=objekt.front_image, fields=fields)
-    embed2 = Embed(url="https://www.google.com", image=objekt.back_image)
-    return [embed1, embed2]
+    embeds = [Embed(url="https://www.google.com", image=objekt.front_image, fields=fields)]
+    if objekt.back_image and objekt.back_image.strip():
+        embeds.append(Embed(url="https://www.google.com", image=objekt.back_image))
+    return embeds
 
 
 async def listen_message(message):
